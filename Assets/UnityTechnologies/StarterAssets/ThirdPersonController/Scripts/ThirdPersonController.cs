@@ -39,6 +39,16 @@ namespace StarterAssets
         [Tooltip("The character uses its own gravity value. The engine default is -9.81f")]
         public float Gravity = -15.0f;
 
+        // Add the jetpack variables here
+        [Header("Jetpack Settings")]
+        [Tooltip("The force applied when using the jetpack")]
+        public float JetpackForce = 5f;
+
+        [Tooltip("Maximum time the jetpack can be used")]
+        public float MaxJetpackTime = 5f;
+
+        private float currentJetpackTime;
+
         [Space(10)]
         [Tooltip("Time required to pass before being able to jump again. Set to 0f to instantly jump again")]
         public float JumpTimeout = 0.50f;
@@ -109,6 +119,8 @@ namespace StarterAssets
         private const float _threshold = 0.01f;
 
         private bool _hasAnimator;
+
+        private bool hasJumped = false; // To track if the player has jumped
 
         private bool IsCurrentDeviceMouse
         {
@@ -283,69 +295,85 @@ namespace StarterAssets
         {
             if (Grounded)
             {
-                // reset the fall timeout timer
+                // Reset jetpack time if grounded
+                currentJetpackTime = MaxJetpackTime;
+
+                // Reset fall timeout timer
                 _fallTimeoutDelta = FallTimeout;
 
-                // update animator if using character
+                // Reset vertical velocity when grounded
+                _verticalVelocity = -2f; // Small negative value to keep grounded
+
+                // Reset jump flag to ensure jump isn't triggered repeatedly when grounded
+                hasJumped = false;
+
+                // Reset the jump timeout
+                _jumpTimeoutDelta = JumpTimeout;
+
+                // Update animator if using character
                 if (_hasAnimator)
                 {
                     _animator.SetBool(_animIDJump, false);
                     _animator.SetBool(_animIDFreeFall, false);
                 }
 
-                // stop our velocity dropping infinitely when grounded
-                if (_verticalVelocity < 0.0f)
+                // Jump if grounded and jump input is received
+                if (_input.jump && _jumpTimeoutDelta <= 0)
                 {
-                    _verticalVelocity = -2f;
-                }
-
-                // Jump
-                if (_input.jump && _jumpTimeoutDelta <= 0.0f)
-                {
-                    // the square root of H * -2 * G = how much velocity needed to reach desired height
+                    // Apply jump force: sqrt(2 * jumpHeight * -gravity)
                     _verticalVelocity = Mathf.Sqrt(JumpHeight * -2f * Gravity);
+                    hasJumped = true; // Set the flag indicating the player has jumped
 
-                    // update animator if using character
+                    // Update animator if using character
                     if (_hasAnimator)
                     {
                         _animator.SetBool(_animIDJump, true);
                     }
                 }
-
-                // jump timeout
-                if (_jumpTimeoutDelta >= 0.0f)
-                {
-                    _jumpTimeoutDelta -= Time.deltaTime;
-                }
             }
             else
             {
-                // reset the jump timeout timer
-                _jumpTimeoutDelta = JumpTimeout;
-
-                // fall timeout
-                if (_fallTimeoutDelta >= 0.0f)
+                // If the player is in the air and presses jump, activate jetpack
+                if (_input.jump && currentJetpackTime > 0 && hasJumped)
                 {
-                    _fallTimeoutDelta -= Time.deltaTime;
+                    // Apply jetpack force but limit vertical velocity
+                    _verticalVelocity = Mathf.Clamp(_verticalVelocity + JetpackForce * Time.deltaTime, -_terminalVelocity, 10f); // Cap max velocity
+
+                    // Decrease jetpack fuel
+                    currentJetpackTime -= Time.deltaTime;
                 }
                 else
                 {
-                    // update animator if using character
-                    if (_hasAnimator)
+                    // Apply gravity if jetpack is not being used or fuel is depleted
+                    if (_verticalVelocity > -_terminalVelocity)
                     {
-                        _animator.SetBool(_animIDFreeFall, true);
+                        _verticalVelocity += Gravity * Time.deltaTime;
                     }
                 }
 
-                // if we are not grounded, do not jump
-                _input.jump = false;
+                // Apply gravity when spacebar is released (stop jetpack)
+                if (!_input.jump)
+                {
+                    if (_verticalVelocity > 0)
+                    {
+                        // Reduce upward velocity faster for a more natural fall
+                        _verticalVelocity += Gravity * Time.deltaTime * 2;
+                    }
+                }
+
+                // Ensure proper falling animation
+                if (_fallTimeoutDelta <= 0f && _hasAnimator)
+                {
+                    _animator.SetBool(_animIDFreeFall, true);
+                }
+                else
+                {
+                    _fallTimeoutDelta -= Time.deltaTime;
+                }
             }
 
-            // apply gravity over time if under terminal (multiply by delta time twice to linearly speed up over time)
-            if (_verticalVelocity < _terminalVelocity)
-            {
-                _verticalVelocity += Gravity * Time.deltaTime;
-            }
+            // Update the jump timeout
+            _jumpTimeoutDelta -= Time.deltaTime;
         }
 
         private static float ClampAngle(float lfAngle, float lfMin, float lfMax)
